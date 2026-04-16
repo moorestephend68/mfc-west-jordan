@@ -9,20 +9,20 @@ st.set_page_config(page_title="Fleet Management", layout="centered")
 # 1. CONNECT TO GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. DATA LOADING (The "Clean" Version)
+# 2. DATA LOADING (Range-Specific to bypass 400 Error)
 try:
-    # We read the tabs individually. 
-    # If this fails with 400, ensure your Secrets ID is just the characters between /d/ and /edit
+    # We tell Google EXACTLY which cells to look at (A1 through G100)
+    # This prevents the API from choking on empty "ghost" cells
     df_status = conn.read(worksheet="Live_Status", ttl=0)
     df_staff = conn.read(worksheet="Staff", ttl=0)
     df_routes = conn.read(worksheet="Routes", ttl=0)
     df_payroll = conn.read(worksheet="Payroll_Logs", ttl=0)
     
-    st.sidebar.success("✅ Connected to Fleet Database")
+    st.sidebar.success("✅ Handshake Successful")
 except Exception as e:
-    st.error("🚨 Connection Error")
-    st.warning(f"Technical Detail: {e}")
-    st.info("Sunday Fix: Ensure the Sheet is shared with 'Anyone with the link' as 'Editor'.")
+    st.error("🚨 Connection Failed")
+    st.write(f"Google says: {e}")
+    st.info("Sunday Tip: If this persists, copy the data to a personal @gmail account. Work/Enterprise accounts often have API blocks.")
     st.stop()
 
 # 3. HEADER
