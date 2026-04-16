@@ -7,20 +7,17 @@ from datetime import datetime
 st.set_page_config(page_title="Fleet Tracker", layout="centered")
 
 # 1. CONNECT TO GOOGLE SHEETS
+# Using the 'spreadsheet' key from secrets automatically
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. DATA LOADING (Pulling all 4 tabs)
+# 2. TEST THE CONNECTION IMMEDIATELY
 try:
-    # ttl=0 ensures the app doesn't show old "cached" data
-    df_status = conn.read(worksheet="Live_Status", ttl=0)
-    df_staff = conn.read(worksheet="Staff", ttl=0)
-    df_routes = conn.read(worksheet="Routes", ttl=0)
-    df_payroll = conn.read(worksheet="Payroll_Logs", ttl=0)
+    # This command asks Google: "What tabs do you have?"
+    available_tabs = conn.list_sheets()
+    st.write("Successfully connected! Found these tabs:", available_tabs)
 except Exception as e:
-    st.error("🚨 Connection Error: The app cannot find one of your tabs.")
-    st.info("Check names: **Live_Status**, **Staff**, **Routes**, and **Payroll_Logs**")
-    # This line tells you exactly what is wrong
-    st.warning(f"Technical Detail: {e}")
+    st.error(f"Connection failed at the source. Error: {e}")
+    st.info("Ensure the Sheet is shared with 'Anyone with the link' as 'Editor'")
     st.stop()
 
 # 3. GET TRUCK ID FROM QR CODE
