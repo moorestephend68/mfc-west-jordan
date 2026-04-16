@@ -7,17 +7,23 @@ from datetime import datetime
 st.set_page_config(page_title="Fleet Tracker", layout="centered")
 
 # 1. CONNECT TO GOOGLE SHEETS
-# Using the 'spreadsheet' key from secrets automatically
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. TEST THE CONNECTION IMMEDIATELY
+# 2. DATA LOADING
 try:
-    # This command asks Google: "What tabs do you have?"
-    available_tabs = conn.list_sheets()
-    st.write("Successfully connected! Found these tabs:", available_tabs)
+    # We "ping" the sheet by reading the Live_Status tab
+    df_status = conn.read(worksheet="Live_Status", ttl=0)
+    df_staff = conn.read(worksheet="Staff", ttl=0)
+    df_routes = conn.read(worksheet="Routes", ttl=0)
+    df_payroll = conn.read(worksheet="Payroll_Logs", ttl=0)
+    
+    st.sidebar.success("✅ Connected to Fleet Database")
+    
 except Exception as e:
-    st.error(f"Connection failed at the source. Error: {e}")
-    st.info("Ensure the Sheet is shared with 'Anyone with the link' as 'Editor'")
+    st.error("🚨 Connection Failed")
+    st.write(f"Error details: {e}")
+    st.info("Check 1: Is your Spreadsheet ID in Secrets correct?")
+    st.info("Check 2: Is the sheet shared with 'Anyone with the link' as 'Editor'?")
     st.stop()
 
 # 3. GET TRUCK ID FROM QR CODE
