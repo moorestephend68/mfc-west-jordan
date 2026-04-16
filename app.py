@@ -11,18 +11,16 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 2. DATA LOADING & CLEANING
 try:
-    # Load all tabs using GIDs for stability
+    # READING using GIDs for high stability
     df_status = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="472708195")
     df_staff = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1358717605")
     df_routes = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="29737201")
     df_payroll = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1732762001")
     
-    # --- CRITICAL FIX: PREVENT TYPEERRORS & MISMATCHES ---
     # Force columns to be strings to handle empty cells and numeric IDs like 9999
     text_cols = ['Vehicle_ID', 'Status', 'Status_Color', 'Driver_Name', 'Route_Number']
     for col in text_cols:
         if col in df_status.columns:
-            # Convert to string, remove decimals like .0, and strip spaces
             df_status[col] = df_status[col].astype(str).str.replace('.0', '', regex=False).replace(['nan', 'None', ''], '')
     
     st.sidebar.success("✅ Database Connected")
@@ -38,7 +36,6 @@ st.title("🚚 Fleet Management Database")
 truck_id = st.query_params.get("truck")
 
 if truck_id:
-    # Clean the scanned ID to match the cleaned sheet IDs
     truck_id = str(truck_id).strip()
     st.divider()
     
@@ -46,10 +43,10 @@ if truck_id:
     truck_row = df_status[df_status['Vehicle_ID'] == truck_id]
     
     if not truck_row.empty:
-        current_status = truck_row.iloc[0]['Status']
+        current_status = str(truck_row.iloc[0]['Status']).strip()
         
         # --- CLOCK-IN FORM ---
-        if current_status == "Red" or current_status == "":
+        if current_status.lower() in ["red", "", "nan"]:
             st.subheader(f"Clock-In: Vehicle {truck_id}")
             with st.form("checkin"):
                 name = st.selectbox("Select Driver", ["Select"] + df_staff['Driver_Name'].astype(str).tolist())
@@ -58,7 +55,6 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if name != "Select" and route != "Select":
-                        # Prepare update
                         updated_status = df_status.copy()
                         idx = updated_status[updated_status['Vehicle_ID'] == truck_id].index[0]
                         
@@ -67,14 +63,13 @@ if truck_id:
                         updated_status.at[idx, 'Driver_Name'] = name
                         updated_status.at[idx, 'Route_Number'] = route
                         
-                        # Write back to Google Sheets
-                        conn.update(worksheet="472708195", data=updated_status)
+                        # WRITING: Use Tab Names here to avoid UnsupportedOperationError
+                        conn.update(worksheet="Live_Status", data=updated_status)
                         
-                        # Log to Payroll
                         new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, name, route, "Check-In", miles]])
-                        conn.append(worksheet="1732762001", data=new_log)
+                        conn.append(worksheet="Payroll_Logs", data=new_log)
                         
-                        st.success(f"Shift Started! Be safe, {name}.")
+                        st.success(f"Shift Started for {name}!")
                         st.rerun()
                     else:
                         st.warning("Please select a name and route.")
@@ -96,10 +91,11 @@ if truck_id:
                     updated_status.at[idx, 'Driver_Name'] = ""
                     updated_status.at[idx, 'Route_Number'] = ""
                     
-                    conn.update(worksheet="472708195", data=updated_status)
+                    # WRITING: Use Tab Names here
+                    conn.update(worksheet="Live_Status", data=updated_status)
                     
                     new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_now, prev_route, "Check-Out", end_miles]])
-                    conn.append(worksheet="1732762001", data=new_log)
+                    conn.append(worksheet="Payroll_Logs", data=new_log)
                     
                     st.success("Shift Ended. Logged successfully!")
                     st.rerun()
@@ -121,6 +117,6 @@ if not map_df.empty:
     try:
         st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
     except Exception:
-        st.info("Map is updating coordinates...")
+        st.info("Map is updating...")
 else:
     st.warning("📍 No valid coordinates found for the map.")
