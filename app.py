@@ -8,45 +8,43 @@ st.set_page_config(page_title="Fleet Management", layout="centered")
 
 # 1. CONNECT TO GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
+# We store the ID in a variable to use for WRITING
+sheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
 # 2. DATA LOADING & CLEANING
 try:
-    # READING using GIDs for high stability
-    df_status = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="472708195")
-    df_staff = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1358717605")
-    df_routes = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="29737201")
-    df_payroll = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1732762001")
+    # Use GIDs for Reading
+    df_status = conn.read(spreadsheet=sheet_url, ttl=0, worksheet="472708195")
+    df_staff = conn.read(spreadsheet=sheet_url, ttl=0, worksheet="1358717605")
+    df_routes = conn.read(spreadsheet=sheet_url, ttl=0, worksheet="29737201")
+    df_payroll = conn.read(spreadsheet=sheet_url, ttl=0, worksheet="1732762001")
     
-    # Force columns to be strings to handle empty cells and numeric IDs like 9999
+    # Clean Columns for matching
     text_cols = ['Vehicle_ID', 'Status', 'Status_Color', 'Driver_Name', 'Route_Number']
     for col in text_cols:
         if col in df_status.columns:
             df_status[col] = df_status[col].astype(str).str.replace('.0', '', regex=False).replace(['nan', 'None', ''], '')
     
-    st.sidebar.success("✅ Database Connected")
+    st.sidebar.success("✅ Connected")
 except Exception as e:
-    st.error("🚨 Connection Error")
-    st.write(f"Technical Detail: {e}")
+    st.error(f"🚨 Connection Error: {e}")
     st.stop()
 
 # 3. APP HEADER
 st.title("🚚 Fleet Management Database")
 
-# 4. TRUCK SCANNER LOGIC (?truck=9999)
+# 4. TRUCK SCANNER LOGIC
 truck_id = st.query_params.get("truck")
 
 if truck_id:
     truck_id = str(truck_id).strip()
-    st.divider()
-    
-    # Search for the truck
     truck_row = df_status[df_status['Vehicle_ID'] == truck_id]
     
     if not truck_row.empty:
-        current_status = str(truck_row.iloc[0]['Status']).strip()
+        current_status = str(truck_row.iloc[0]['Status']).strip().lower()
         
         # --- CLOCK-IN FORM ---
-        if current_status.lower() in ["red", "", "nan"]:
+        if current_status in ["red", "", "nan"]:
             st.subheader(f"Clock-In: Vehicle {truck_id}")
             with st.form("checkin"):
                 name = st.selectbox("Select Driver", ["Select"] + df_staff['Driver_Name'].astype(str).tolist())
@@ -55,68 +53,45 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if name != "Select" and route != "Select":
-                        updated_status = df_status.copy()
-                        idx = updated_status[updated_status['Vehicle_ID'] == truck_id].index[0]
+                        # Logic Update
+                        df_status.loc[df_status['Vehicle_ID'] == truck_id, ['Status', 'Status_Color', 'Driver_Name', 'Route_Number']] = ["Green", "#00FF00", name, route]
                         
-                        updated_status.at[idx, 'Status'] = "Green"
-                        updated_status.at[idx, 'Status_Color'] = "#00FF00"
-                        updated_status.at[idx, 'Driver_Name'] = name
-                        updated_status.at[idx, 'Route_Number'] = route
-                        
-                        # WRITING: Use Tab Names here to avoid UnsupportedOperationError
-                        conn.update(worksheet="Live_Status", data=updated_status)
+                        # EXPLICIT WRITE (Bypasses UnsupportedOperationError)
+                        conn.update(spreadsheet=sheet_url, worksheet="Live_Status", data=df_status)
                         
                         new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, name, route, "Check-In", miles]])
-                        conn.append(worksheet="Payroll_Logs", data=new_log)
+                        conn.append(spreadsheet=sheet_url, worksheet="Payroll_Logs", data=new_log)
                         
-                        st.success(f"Shift Started for {name}!")
+                        st.success("Shift Started!")
                         st.rerun()
-                    else:
-                        st.warning("Please select a name and route.")
-
+        
         # --- CLOCK-OUT FORM ---
         else:
             driver_now = truck_row.iloc[0]['Driver_Name']
             st.subheader(f"Clock-Out: Vehicle {truck_id} ({driver_now})")
             with st.form("checkout"):
                 end_miles = st.number_input("Ending Odometer", min_value=0, step=1)
-                
                 if st.form_submit_button("End Shift", use_container_width=True):
-                    updated_status = df_status.copy()
-                    idx = updated_status[updated_status['Vehicle_ID'] == truck_id].index[0]
-                    prev_route = updated_status.at[idx, 'Route_Number']
+                    prev_route = truck_row.iloc[0]['Route_Number']
+                    df_status.loc[df_status['Vehicle_ID'] == truck_id, ['Status', 'Status_Color', 'Driver_Name', 'Route_Number']] = ["Red", "#FF0000", "", ""]
                     
-                    updated_status.at[idx, 'Status'] = "Red"
-                    updated_status.at[idx, 'Status_Color'] = "#FF0000"
-                    updated_status.at[idx, 'Driver_Name'] = ""
-                    updated_status.at[idx, 'Route_Number'] = ""
-                    
-                    # WRITING: Use Tab Names here
-                    conn.update(worksheet="Live_Status", data=updated_status)
+                    conn.update(spreadsheet=sheet_url, worksheet="Live_Status", data=df_status)
                     
                     new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_now, prev_route, "Check-Out", end_miles]])
-                    conn.append(worksheet="Payroll_Logs", data=new_log)
+                    conn.append(spreadsheet=sheet_url, worksheet="Payroll_Logs", data=new_log)
                     
-                    st.success("Shift Ended. Logged successfully!")
+                    st.success("Shift Ended!")
                     st.rerun()
     else:
         st.error(f"Vehicle '{truck_id}' not found.")
-else:
-    st.info("👋 Ready for scan. Please use a vehicle QR code.")
 
-# 5. PUBLIC DASHBOARD (Big Map)
+# 5. PUBLIC DASHBOARD (Map)
 st.divider()
 st.subheader("Live Fleet Location")
-
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
 map_df['Lon'] = pd.to_numeric(map_df['Lon'], errors='coerce')
 map_df = map_df.dropna(subset=['Lat', 'Lon'])
 
 if not map_df.empty:
-    try:
-        st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
-    except Exception:
-        st.info("Map is updating...")
-else:
-    st.warning("📍 No valid coordinates found for the map.")
+    st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
