@@ -9,9 +9,9 @@ st.set_page_config(page_title="Fleet Management", layout="centered")
 # 1. CONNECT TO GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. DATA LOADING (Using your specific GIDs for stability)
+# 2. DATA LOADING (Hard-wired to your specific GIDs)
 try:
-    # We use the GIDs you provided to ensure we hit the right tabs regardless of naming issues
+    # spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"] pulls the ID from your Secrets
     df_status = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="472708195")
     df_staff = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1358717605")
     df_routes = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="29737201")
@@ -26,13 +26,11 @@ except Exception as e:
 # 3. APP HEADER
 st.title("🚚 Fleet Management Database")
 
-# 4. TRUCK SCANNER LOGIC
-# This looks for ?truck=Truck-01 in the URL
+# 4. TRUCK SCANNER LOGIC (?truck=Truck-01)
 truck_id = st.query_params.get("truck")
 
 if truck_id:
     st.divider()
-    # Find the specific truck row
     truck_row = df_status[df_status['Vehicle_ID'] == truck_id]
     
     if not truck_row.empty:
@@ -48,7 +46,6 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if name != "Select" and route != "Select":
-                        # Update Live_Status
                         updated_status = df_status.copy()
                         idx = updated_status[updated_status['Vehicle_ID'] == truck_id].index[0]
                         updated_status.at[idx, 'Status'] = "Green"
@@ -57,7 +54,6 @@ if truck_id:
                         updated_status.at[idx, 'Route_Number'] = route
                         conn.update(worksheet="472708195", data=updated_status)
                         
-                        # Log to Payroll
                         new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, name, route, "Check-In", miles]])
                         conn.append(worksheet="1732762001", data=new_log)
                         
@@ -74,7 +70,6 @@ if truck_id:
                 end_miles = st.number_input("Ending Odometer", min_value=0, step=1)
                 
                 if st.form_submit_button("End Shift", use_container_width=True):
-                    # Reset Live_Status
                     updated_status = df_status.copy()
                     idx = updated_status[updated_status['Vehicle_ID'] == truck_id].index[0]
                     prev_route = updated_status.at[idx, 'Route_Number']
@@ -85,7 +80,6 @@ if truck_id:
                     updated_status.at[idx, 'Route_Number'] = ""
                     conn.update(worksheet="472708195", data=updated_status)
                     
-                    # Log to Payroll
                     new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_now, prev_route, "Check-Out", end_miles]])
                     conn.append(worksheet="1732762001", data=new_log)
                     
@@ -98,7 +92,7 @@ if truck_id:
 st.divider()
 st.subheader("Live Fleet Location")
 
-# CLEAN DATA FOR MAP: This prevents the crash you saw earlier
+# CLEAN DATA FOR MAP: Force Lat/Lon to be numeric
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
 map_df['Lon'] = pd.to_numeric(map_df['Lon'], errors='coerce')
@@ -106,12 +100,15 @@ map_df = map_df.dropna(subset=['Lat', 'Lon'])
 
 if not map_df.empty:
     try:
-        # Drawing pins based on West Jordan coordinates in your sheet
+        # Drawing pins based on Columns F and G
         st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color")
     except Exception as map_err:
-        st.info("Map is loading coordinates...")
+        st.info("Map is loading...")
 else:
-    st.warning("📍 No valid coordinates found. Please add Lat/Lon numbers to your Live_Status tab.")
+    # DEBUG INFO: This only shows if the map is empty
+    st.warning("📍 No numeric coordinates found in Columns F and G.")
+    st.write("Headers found:", df_status.columns.tolist())
+    st.write("Data detected in Lat/Lon:", df_status[['Lat', 'Lon']].head())
 
 st.subheader("Vehicle Overview")
 st.dataframe(df_status[['Vehicle_ID', 'Status', 'Driver_Name', 'Route_Number']], 
