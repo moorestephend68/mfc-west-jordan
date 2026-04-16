@@ -20,12 +20,6 @@ try:
     
     st.sidebar.success("Connected to: Fleet_Management_Database")
     
-except Exception as e:
-    st.error("🚨 Connection Error")
-    st.write(f"Technical Detail: {e}")
-    st.info("Check: Are your tabs named Live_Status, Staff, Routes, and Payroll_Logs?")
-    st.stop()
-
 # 3. APP HEADER
 st.title("🚚 Fleet Management Database")
 st.markdown(f"**Current Date:** {datetime.now().strftime('%A, %b %d')}")
