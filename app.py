@@ -11,7 +11,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 2. DATA LOADING (Hard-wired to your specific GIDs)
 try:
-    # spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"] pulls the ID from your Secrets
     df_status = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="472708195")
     df_staff = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="1358717605")
     df_routes = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], ttl=0, worksheet="29737201")
@@ -88,11 +87,11 @@ if truck_id:
     else:
         st.error(f"Vehicle '{truck_id}' not found.")
 
-# 5. PUBLIC DASHBOARD & MAP
+# 5. PUBLIC DASHBOARD (Map Only)
 st.divider()
 st.subheader("Live Fleet Location")
 
-# CLEAN DATA FOR MAP: Force Lat/Lon to be numeric
+# CLEAN DATA FOR MAP
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
 map_df['Lon'] = pd.to_numeric(map_df['Lon'], errors='coerce')
@@ -100,16 +99,11 @@ map_df = map_df.dropna(subset=['Lat', 'Lon'])
 
 if not map_df.empty:
     try:
-        # Drawing pins based on Columns F and G
-        st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color")
+        # Added 'height=600' to make the map much larger
+        st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
     except Exception as map_err:
         st.info("Map is loading...")
 else:
-    # DEBUG INFO: This only shows if the map is empty
     st.warning("📍 No numeric coordinates found in Columns F and G.")
-    st.write("Headers found:", df_status.columns.tolist())
-    st.write("Data detected in Lat/Lon:", df_status[['Lat', 'Lon']].head())
 
-st.subheader("Vehicle Overview")
-st.dataframe(df_status[['Vehicle_ID', 'Status', 'Driver_Name', 'Route_Number']], 
-             hide_index=True, use_container_width=True)
+# VEHICLE OVERVIEW REMOVED PER REQUEST
