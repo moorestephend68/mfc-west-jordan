@@ -3,42 +3,38 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# Set page to mobile-friendly
+# Mobile-friendly settings
 st.set_page_config(page_title="Fleet Tracker", layout="centered")
 
 # 1. CONNECT TO GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 2. DATA LOADING HELPER
-def load_data():
-    # Reading the exact tab names we discussed
-    status_df = conn.read(worksheet="Live_Status")
-    staff_df = conn.read(worksheet="Staff")
-    routes_df = conn.read(worksheet="Routes")
-    return status_df, staff_df, routes_df
-
+# 2. LOAD DATA (Individually to avoid total crash)
 try:
-    df_status, df_staff, df_routes = load_data()
+    df_status = conn.read(worksheet="Live_Status", ttl=0)
+    df_staff = conn.read(worksheet="Staff", ttl=0)
+    df_routes = conn.read(worksheet="Routes", ttl=0)
 except Exception as e:
-    st.error("Connection Error. Ensure your Google Sheet tabs are named: Live_Status, Staff, and Routes.")
+    st.error("Connection Error: Streamlit cannot find your tabs. Check names: Live_Status, Staff, Routes")
+    st.info("Make sure your Google Sheet is shared as 'Anyone with the link can EDIT'")
     st.stop()
 
-# 3. GET TRUCK ID FROM QR CODE (URL)
-# Link format: https://your-app.streamlit.app/?truck=Truck-01
+# 3. GET TRUCK ID FROM QR CODE
+# URL: https://your-app.streamlit.app/?truck=Truck-01
 truck_id = st.query_params.get("truck")
 
 if truck_id:
     st.header(f"🚚 {truck_id}")
     
-    # Get current row for this truck
+    # Filter for the specific truck
     truck_data = df_status[df_status['Vehicle_ID'] == truck_id]
     
     if not truck_data.empty:
         current_status = truck_data.iloc[0]['Status']
         
-        # --- OPTION A: CHECK IN ---
         if current_status == "Red":
-            st.subheader("Check-In to Shift")
+            # --- CHECK IN FORM ---
+            st.subheader("Start Shift")
             with st.form("checkin"):
                 name = st.selectbox("Select Name", ["Select"] + df_staff['Driver_Name'].tolist())
                 route = st.selectbox("Select Route", ["Select"] + df_routes['Route_ID'].tolist())
@@ -46,31 +42,58 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if name != "Select" and route != "Select":
-                        # In the Sunday version, the app instructs how to finalize write-back
-                        st.success(f"Shift Started for {name}!")
-                        st.balloons()
-                        # Log to payroll logic goes here
+                        # Logic to update Google Sheets
+                        updated_df = df_status.copy()
+                        idx = updated_df[updated_df['Vehicle_ID'] == truck_id].index[0]
+                        updated_df.at[idx, 'Status'] = "Green"
+                        updated_df.at[idx, 'Status_Color'] = "#00FF00"
+                        updated_df.at[idx, 'Driver_Name'] = name
+                        updated_df.at[idx, 'Route_Number'] = route
+                        
+                        # Update the Sheet
+                        conn.update(worksheet="Live_Status", data=updated_df)
+                        
+                        # Log for Payroll
+                        new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, name, route, "Check-In", miles]])
+                        conn.append(worksheet="Payroll_Logs", data=new_log)
+                        
+                        st.success(f"Shift Started! Stay safe, {name}.")
+                        st.rerun()
                     else:
-                        st.warning("Please select your name and route.")
+                        st.warning("Please select your Name and Route.")
 
-        # --- OPTION B: CHECK OUT ---
         else:
+            # --- CHECK OUT FORM ---
             driver_on_shift = truck_data.iloc[0]['Driver_Name']
-            st.subheader(f"Checking Out: {driver_on_shift}")
+            st.subheader(f"End Shift: {driver_on_shift}")
             with st.form("checkout"):
                 end_miles = st.number_input("Ending Mileage", min_value=0, step=1)
-                if st.form_submit_button("End Shift", use_container_width=True):
-                    st.success("Shift Ended. Data logged for payroll.")
+                if st.form_submit_button("Clock Out", use_container_width=True):
+                    # Logic to update Google Sheets back to Red
+                    updated_df = df_status.copy()
+                    idx = updated_df[updated_df['Vehicle_ID'] == truck_id].index[0]
+                    prev_route = updated_df.at[idx, 'Route_Number']
+                    
+                    updated_df.at[idx, 'Status'] = "Red"
+                    updated_df.at[idx, 'Status_Color'] = "#FF0000"
+                    updated_df.at[idx, 'Driver_Name'] = ""
+                    updated_df.at[idx, 'Route_Number'] = ""
+                    
+                    conn.update(worksheet="Live_Status", data=updated_df)
+                    
+                    # Log for Payroll
+                    new_log = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_on_shift, prev_route, "Check-Out", end_miles]])
+                    conn.append(worksheet="Payroll_Logs", data=new_log)
+                    
+                    st.success("Shift Ended. See you next time!")
+                    st.rerun()
     else:
-        st.error(f"Truck ID '{truck_id}' not found in Live_Status tab.")
+        st.error(f"Truck ID '{truck_id}' not found in the list.")
 
-# 4. LIVE MAP DASHBOARD
+# 4. DASHBOARD (Always Visible)
 st.divider()
 st.title("Live Fleet Map")
-
-# Map points (Ensuring colors match status)
 st.map(df_status, latitude="Lat", longitude="Lon", color="Status_Color")
 
-# Status Table
 st.subheader("Current Assignments")
-st.dataframe(df_status[['Vehicle_ID', 'Status', 'Driver_Name', 'Route_Number']], hide_index=True)
+st.dataframe(df_status[['Vehicle_ID', 'Status', 'Driver_Name', 'Route_Number']], hide_index=True, use_container_width=True)
