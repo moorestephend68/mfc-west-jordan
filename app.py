@@ -19,6 +19,11 @@ try:
     df_payroll = conn.read(worksheet="Payroll_Logs", ttl=0)
     
     st.sidebar.success("Connected to: Fleet_Management_Database")
+
+except Exception as e:
+    st.error("🚨 Connection Error")
+    st.write(f"Technical Detail: {e}")
+    st.stop()
     
 # 3. APP HEADER
 st.title("🚚 Fleet Management Database")
