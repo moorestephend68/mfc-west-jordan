@@ -15,8 +15,9 @@ SHEET_ID = "1ib1MEFybGRteaZRJnyJ3UZAgk6mep5nsjws_uYfbwiw"
 @st.cache_data(ttl=10)
 def get_fleet_data():
     try:
-        # Reaching the underlying gspread client
-        client = conn.client.client 
+        # Accessing the underlying gspread client via the internal _client attribute
+        # This is the "Universal Access" method
+        client = conn.client._client 
         sh = client.open_by_key(SHEET_ID)
         
         # Load the tabs exactly as named
@@ -34,7 +35,7 @@ load_result = get_fleet_data()
 if isinstance(load_result, str):
     st.error("🚨 Connection Error")
     st.write(f"Technical Detail: {load_result}")
-    st.info("Ensure the Service Account is an Editor on the Google Sheet!")
+    st.info("Check your Tab Names and ensure the Service Account is an Editor.")
     if st.button("Clear Cache & Retry"):
         st.cache_data.clear()
         st.rerun()
@@ -43,10 +44,10 @@ if isinstance(load_result, str):
 df_status, df_staff, df_routes = load_result
 
 # 3. DATA CLEANING
-# Clean Vehicle_ID to prevent "9999.0" vs "9999" matching errors
+# Clean Vehicle_ID to prevent matching errors
 df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
 
-# 4. TRUCK SCANNER LOGIC
+# 4. TRUCK SCANNER LOGIC (?truck=XXXX)
 truck_id = st.query_params.get("truck")
 
 if truck_id:
@@ -66,11 +67,11 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if driver_name != "Select" and route_id != "Select":
-                        # Logic to find row (Row 1 is header, so index + 2)
+                        # Row 1 is header, so index + 2
                         idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0] + 2
                         
-                        # Access GSheets Directly
-                        sh = conn.client.client.open_by_key(SHEET_ID)
+                        # Write Directly via gspread
+                        sh = conn.client._client.open_by_key(SHEET_ID)
                         ws = sh.worksheet("Live_Status")
                         
                         # Update columns (B=2, C=3, D=4, E=5)
@@ -83,11 +84,11 @@ if truck_id:
                         log_ws = sh.worksheet("Payroll_Logs")
                         log_ws.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_name, route_id, "Check-In", miles])
                         
-                        st.success(f"Success! Vehicle {truck_id} is now LIVE.")
+                        st.success(f"Shift Started for {driver_name}!")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.warning("Selection missing.")
+                        st.warning("Please select a Driver and a Route.")
 
         # --- CLOCK-OUT FORM ---
         else:
@@ -98,7 +99,7 @@ if truck_id:
                 if st.form_submit_button("End Shift", use_container_width=True):
                     idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0] + 2
                     
-                    sh = conn.client.client.open_by_key(SHEET_ID)
+                    sh = conn.client._client.open_by_key(SHEET_ID)
                     ws = sh.worksheet("Live_Status")
                     
                     ws.update_cell(idx, 2, "Red")
@@ -109,7 +110,7 @@ if truck_id:
                     log_ws = sh.worksheet("Payroll_Logs")
                     log_ws.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_now, "", "Check-Out", end_miles])
                     
-                    st.success("Shift Ended.")
+                    st.success("Shift Ended. Logged successfully.")
                     st.cache_data.clear()
                     st.rerun()
     else:
@@ -117,7 +118,7 @@ if truck_id:
 
 # 5. DASHBOARD MAP
 st.divider()
-st.title("🚚 Fleet Dashboard")
+st.title("🚚 Live Fleet Dashboard")
 
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
@@ -127,4 +128,4 @@ map_df = map_df.dropna(subset=['Lat', 'Lon'])
 if not map_df.empty:
     st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
 else:
-    st.warning("No GPS data found in Live_Status.")
+    st.info("Awaiting GPS data in the Live_Status sheet.")
