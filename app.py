@@ -14,21 +14,30 @@ SHEET_ID = "1TdLC1DL4y7hvxnEguq7CtWWTkWMPXLRYvWrB_1JrzTQ"
 @st.cache_data(ttl=10)
 def get_fleet_data():
     try:
-        # Access gspread client via internal _client
         client = conn.client._client 
         sh = client.open_by_key(SHEET_ID)
         
-        # Pull data using your verified GIDs
-        # ws_status: Live_Status
-        # ws_staff: Staff
-        # ws_routes: Routes
-        ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
-        ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
-        ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
+        # Test 1: Status
+        try:
+            ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
+        except:
+            return "Failed to find 'Live_Status' tab (GID: 472708195)"
+            
+        # Test 2: Staff
+        try:
+            ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
+        except:
+            return "Failed to find 'Staff' tab (GID: 1358717605)"
+            
+        # Test 3: Routes
+        try:
+            ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
+        except:
+            return "Failed to find 'Routes' tab (GID: 29737201)"
         
         return pd.DataFrame(ws_status), pd.DataFrame(ws_staff), pd.DataFrame(ws_routes)
     except Exception as e:
-        return f"Error connecting to GIDs: {str(e)}"
+        return f"General Connection Error: {str(e)}"
 
 # RUN LOADER
 load_result = get_fleet_data()
