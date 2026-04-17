@@ -15,29 +15,25 @@ SHEET_ID = "1TdLC1DL4y7hvxnEguq7CtWWTkWMPXLRYvWrB_1JrzTQ"
 def get_fleet_data():
     try:
         client = conn.client._client 
+        # This is the line that is likely failing:
         sh = client.open_by_key(SHEET_ID)
         
-        # Test 1: Status
-        try:
-            ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
-        except:
-            return "Failed to find 'Live_Status' tab (GID: 472708195)"
-            
-        # Test 2: Staff
-        try:
-            ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
-        except:
-            return "Failed to find 'Staff' tab (GID: 1358717605)"
-            
-        # Test 3: Routes
-        try:
-            ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
-        except:
-            return "Failed to find 'Routes' tab (GID: 29737201)"
+        # If it gets past 'open_by_key', the connection is valid!
+        ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
+        ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
+        ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
         
         return pd.DataFrame(ws_status), pd.DataFrame(ws_staff), pd.DataFrame(ws_routes)
     except Exception as e:
-        return f"General Connection Error: {str(e)}"
+        # This will now print the FULL error message from Google
+        error_msg = str(e)
+        if "API_KEY_INVALID" in error_msg:
+            return "Error: Your Private Key in Secrets is formatted incorrectly."
+        if "PERMISSION_DENIED" in error_msg:
+            return "Error: Service Account email is not an EDITOR on the new Google Sheet."
+        if "requested entity was not found" in error_msg:
+            return "Error: The Sheet ID is incorrect or the GIDs don't exist."
+        return f"Full Debug Error: {error_msg}"
 
 # RUN LOADER
 load_result = get_fleet_data()
