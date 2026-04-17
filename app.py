@@ -9,19 +9,28 @@ st.set_page_config(page_title="Fleet Management", layout="centered")
 conn = st.connection("gsheets", type=GSheetsConnection)
 url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
-# 2. LOAD DATA
+# 2. DATA LOADING
 try:
-    # Use GIDs for reading
-    df_status = conn.read(spreadsheet=url, worksheet="472708195", ttl=0)
-    df_staff = conn.read(spreadsheet=url, worksheet="1358717605", ttl=0)
-    df_routes = conn.read(spreadsheet=url, worksheet="29737201", ttl=0)
+    # Explicitly telling the connection to read
+    df_status = conn.read(spreadsheet=url, worksheet="Live_Status", ttl="1m")
+    df_staff = conn.read(spreadsheet=url, worksheet="Staff_List", ttl="1h")
+    df_routes = conn.read(spreadsheet=url, worksheet="Routes", ttl="1h")
     
-    # Clean ID formatting
-    df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
-    st.sidebar.success("✅ Secure Connection Active")
+    # Verify we actually got a table and not just a response code
+    if isinstance(df_status, pd.DataFrame):
+        df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        st.sidebar.success("✅ Secure Connection Active")
+    else:
+        st.error("Received an empty response. Trying to refresh...")
+        st.rerun()
+
 except Exception as e:
-    st.error(f"Connection Error: {e}")
-    st.stop()
+    # If it's just the [200] message, let's treat it as a success and rerun
+    if "200" in str(e):
+        st.rerun()
+    else:
+        st.error(f"Connection Error: {e}")
+        st.stop()
 
 # 3. SCANNER LOGIC
 truck_id = st.query_params.get("truck")
