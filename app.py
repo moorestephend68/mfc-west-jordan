@@ -5,40 +5,46 @@ from datetime import datetime
 
 st.set_page_config(page_title="Fleet Management", layout="centered")
 
-# 1. CONNECT
+# 1. SECURE CONNECTION
 conn = st.connection("gsheets", type=GSheetsConnection)
 url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
-# 2. DATA LOADING (Simplified for Testing)
-def load_data():
+# 2. THE "FORCE READ" FUNCTION
+@st.cache_data(ttl=10) # Refresh every 10 seconds
+def get_data_forcefully():
     try:
-        # We try to read using the NAME of the tab instead of the GID
-        df = conn.read(spreadsheet=url, worksheet="Live_Status", ttl=0)
+        # We bypass 'conn.read' and use the underlying client directly
+        # This prevents the <Response [200]> error
+        sheet = conn.client.open_by_key("1ib1MEFybGRteaZRJnyJ3UZAgk6mep5nsjws_uYfbwiw")
         
-        # If this works, we know the connection is good!
-        if df is not None:
-            df['Vehicle_ID'] = df['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
-            return df
-        return "Empty Sheet"
+        # Load the three tabs
+        ws_status = sheet.worksheet("Live_Status").get_all_records()
+        ws_staff = sheet.worksheet("Staff_List").get_all_records() # Ensure this name is exact
+        ws_routes = sheet.worksheet("Routes").get_all_records()     # Ensure this name is exact
+        
+        return pd.DataFrame(ws_status), pd.DataFrame(ws_staff), pd.DataFrame(ws_routes)
     except Exception as e:
         return str(e)
 
-result = load_data()
+# RUN THE FORCE LOAD
+result = get_data_forcefully()
 
-# If the result is a string, it's an error message
 if isinstance(result, str):
-    st.error("🚨 Connection still not active")
-    st.write(f"Google says: {result}")
-    if st.button("Force System Reboot"):
+    st.error("🚨 Final Connection Hurdle")
+    st.write(f"Technical Detail: {result}")
+    st.info("If it says 'Worksheet not found', check your Tab Names in Google Sheets!")
+    if st.button("Clear System Cache & Retry"):
         st.cache_data.clear()
         st.rerun()
     st.stop()
 
-# If we get here, it worked!
-df_status = result
-st.sidebar.success("✅ Secure Connection Active")
+# Assign dataframes
+df_status, df_staff, df_routes = result
 
-# 3. TRUCK SCANNER LOGIC
+# Clean IDs
+df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).strip()
+
+# 3. SCANNER LOGIC
 truck_id = st.query_params.get("truck")
 if truck_id:
     truck_id = str(truck_id).strip()
@@ -50,26 +56,35 @@ if truck_id:
         if status in ["red", "", "nan"]:
             st.subheader(f"Clock-In: Vehicle {truck_id}")
             with st.form("checkin"):
-                name = st.selectbox("Driver", ["Select"] + df_staff['Driver_Name'].tolist())
-                route = st.selectbox("Route", ["Select"] + df_routes['Route_ID'].tolist())
+                name = st.selectbox("Driver", ["Select"] + df_staff.iloc[:, 0].tolist())
+                route = st.selectbox("Route", ["Select"] + df_routes.iloc[:, 0].tolist())
                 miles = st.number_input("Odometer", min_value=0)
                 if st.form_submit_button("Start Shift"):
-                    if name != "Select" and route != "Select":
-                        df_status.loc[df_status['Vehicle_ID'] == truck_id, ['Status', 'Status_Color', 'Driver_Name', 'Route_Number']] = ["Green", "#00FF00", name, route]
-                        conn.update(spreadsheet=url, worksheet="Live_Status", data=df_status)
-                        st.success("Success!")
-                        st.rerun()
+                    # Update Sheet
+                    idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0]
+                    # Direct update to avoid the [200] error
+                    sh = conn.client.open_by_key("1ib1MEFybGRteaZRJnyJ3UZAgk6mep5nsjws_uYfbwiw").worksheet("Live_Status")
+                    sh.update_cell(idx + 2, 2, "Green") # Column B: Status
+                    sh.update_cell(idx + 2, 3, "#00FF00") # Column C: Color
+                    sh.update_cell(idx + 2, 4, name) # Column D: Driver
+                    sh.update_cell(idx + 2, 5, route) # Column E: Route
+                    
+                    st.success("Success! Truck is now Green.")
+                    st.cache_data.clear()
+                    st.rerun()
         else:
-            driver_now = truck_row.iloc[0]['Driver_Name']
-            st.subheader(f"Clock-Out: {truck_id} ({driver_now})")
+            st.subheader(f"Clock-Out: {truck_id}")
             if st.button("End Shift"):
-                df_status.loc[df_status['Vehicle_ID'] == truck_id, ['Status', 'Status_Color', 'Driver_Name', 'Route_Number']] = ["Red", "#FF0000", "", ""]
-                conn.update(spreadsheet=url, worksheet="Live_Status", data=df_status)
+                idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0]
+                sh = conn.client.open_by_key("1ib1MEFybGRteaZRJnyJ3UZAgk6mep5nsjws_uYfbwiw").worksheet("Live_Status")
+                sh.update_cell(idx + 2, 2, "Red")
+                sh.update_cell(idx + 2, 3, "#FF0000")
+                sh.update_cell(idx + 2, 4, "")
+                sh.update_cell(idx + 2, 5, "")
+                st.cache_data.clear()
                 st.rerun()
-    else:
-        st.error(f"Vehicle '{truck_id}' not found.")
 
-# 4. BIG MAP
+# 4. MAP
 st.divider()
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
