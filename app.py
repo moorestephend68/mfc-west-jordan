@@ -7,6 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Fleet Management", layout="wide")
 
 # 2. SECURE CONNECTION
+# Note: Ensure st.secrets has the new Sheet ID: 1TdLC1DL4y7hvxnEguq7CtWWTkWMPXLRYvWrB_1JrzTQ
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_ID = "1TdLC1DL4y7hvxnEguq7CtWWTkWMPXLRYvWrB_1JrzTQ"
 
@@ -14,46 +15,44 @@ SHEET_ID = "1TdLC1DL4y7hvxnEguq7CtWWTkWMPXLRYvWrB_1JrzTQ"
 @st.cache_data(ttl=10)
 def get_fleet_data():
     try:
+        # Access gspread client via internal _client
         client = conn.client._client 
-        # This is the line that is likely failing:
         sh = client.open_by_key(SHEET_ID)
         
-        # If it gets past 'open_by_key', the connection is valid!
+        # Pull data using your verified GIDs
         ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
         ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
         ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
         
         return pd.DataFrame(ws_status), pd.DataFrame(ws_staff), pd.DataFrame(ws_routes)
     except Exception as e:
-        # This will now print the FULL error message from Google
-        error_msg = str(e)
-        if "API_KEY_INVALID" in error_msg:
-            return "Error: Your Private Key in Secrets is formatted incorrectly."
-        if "PERMISSION_DENIED" in error_msg:
-            return "Error: Service Account email is not an EDITOR on the new Google Sheet."
-        if "requested entity was not found" in error_msg:
-            return "Error: The Sheet ID is incorrect or the GIDs don't exist."
-        return f"Full Debug Error: {error_msg}"
+        # Return the actual error message for debugging
+        return f"{type(e).__name__}: {str(e)}"
 
 # RUN LOADER
 load_result = get_fleet_data()
 
+# 4. ERROR HANDLING
 if isinstance(load_result, str):
-    st.error("🚨 Sheet Access Error")
-    st.write(f"Technical Detail: {load_result}")
-    st.info("Check that the Service Account is an Editor and the Sheet ID is correct.")
-    if st.button("Clear Cache & Retry"):
+    st.error("🚨 Connection Error")
+    st.markdown(f"**Technical Detail:** `{load_result}`")
+    
+    st.info("💡 **Quick Fix Steps:**\n"
+            "1. Share the sheet with: `fleet-manager@west-jordan-fleet.iam.gserviceaccount.com` as **Editor**.\n"
+            "2. Ensure the Google Drive API is enabled in Google Cloud Console.\n"
+            "3. Check your Streamlit Secrets for any typos.")
+    
+    if st.button("Deep Cache Reset & Retry"):
         st.cache_data.clear()
         st.rerun()
     st.stop()
 
 df_status, df_staff, df_routes = load_result
 
-# 4. DATA CLEANING
-# Ensure Vehicle_ID is a clean string for matching (handles 9999 vs 9999.0)
+# 5. DATA CLEANING
 df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
 
-# 5. TRUCK SCANNER LOGIC (?truck=XXXX)
+# 6. TRUCK SCANNER LOGIC (?truck=XXXX)
 truck_id = st.query_params.get("truck")
 
 if truck_id:
@@ -73,16 +72,15 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if driver_name != "Select" and route_id != "Select":
-                        # Google Sheets rows are 1-indexed, +1 for header = index + 2
                         idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0] + 2
                         sh = conn.client._client.open_by_key(SHEET_ID)
                         
                         # Update Live_Status (GID: 472708195)
                         ws = sh.get_worksheet_by_id(472708195)
-                        ws.update_cell(idx, 2, "Green")       # Col B: Status
-                        ws.update_cell(idx, 3, "#00FF00")    # Col C: Color
-                        ws.update_cell(idx, 4, driver_name)  # Col D: Driver
-                        ws.update_cell(idx, 5, route_id)     # Col E: Route
+                        ws.update_cell(idx, 2, "Green")
+                        ws.update_cell(idx, 3, "#00FF00")
+                        ws.update_cell(idx, 4, driver_name)
+                        ws.update_cell(idx, 5, route_id)
                         
                         # Update Payroll_Logs (GID: 1732762001)
                         log_ws = sh.get_worksheet_by_id(1732762001)
@@ -121,7 +119,7 @@ if truck_id:
     else:
         st.error(f"Vehicle '{truck_id}' not found in database.")
 
-# 6. DASHBOARD MAP
+# 7. DASHBOARD MAP
 st.divider()
 st.title("🚚 Live Fleet Dashboard")
 
@@ -133,4 +131,4 @@ map_df = map_df.dropna(subset=['Lat', 'Lon'])
 if not map_df.empty:
     st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
 else:
-    st.info("Waiting for data with valid GPS coordinates in the Live_Status sheet.")
+    st.info("Awaiting valid GPS coordinates (Lat/Lon) in the Live_Status sheet.")
