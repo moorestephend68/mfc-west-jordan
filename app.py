@@ -9,32 +9,33 @@ st.set_page_config(page_title="Fleet Management", layout="centered")
 conn = st.connection("gsheets", type=GSheetsConnection)
 url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
-# 2. DATA LOADING
+# 2. DATA LOADING (Simplified for Testing)
 def load_data():
     try:
-        # Load sheets by NAME (Must match tab names exactly)
+        # We try to read using the NAME of the tab instead of the GID
         df = conn.read(spreadsheet=url, worksheet="Live_Status", ttl=0)
-        staff = conn.read(spreadsheet=url, worksheet="1358717605", ttl=0) # Staff GID
-        routes = conn.read(spreadsheet=url, worksheet="29737201", ttl=0)  # Routes GID
         
-        # Format Cleaning
-        df['Vehicle_ID'] = df['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
-        return df, staff, routes
+        # If this works, we know the connection is good!
+        if df is not None:
+            df['Vehicle_ID'] = df['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            return df
+        return "Empty Sheet"
     except Exception as e:
         return str(e)
 
-# RUN LOADER
 result = load_data()
 
+# If the result is a string, it's an error message
 if isinstance(result, str):
-    st.error("🔄 Connection Reset Required")
-    st.info("Ensure you have shared the Google Sheet with the Service Account email as an **Editor**.")
-    if st.button("I've shared it—Retry Connection"):
+    st.error("🚨 Connection still not active")
+    st.write(f"Google says: {result}")
+    if st.button("Force System Reboot"):
         st.cache_data.clear()
         st.rerun()
     st.stop()
 
-df_status, df_staff, df_routes = result
+# If we get here, it worked!
+df_status = result
 st.sidebar.success("✅ Secure Connection Active")
 
 # 3. TRUCK SCANNER LOGIC
