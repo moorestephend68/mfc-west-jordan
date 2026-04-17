@@ -6,37 +6,37 @@ from datetime import datetime
 st.set_page_config(page_title="Fleet Management", layout="centered")
 
 # 1. CONNECT
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-except Exception as e:
-    st.error("Secrets or Connection failed. Check your Streamlit Dashboard.")
-    st.stop()
+conn = st.connection("gsheets", type=GSheetsConnection)
+url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
-# 2. DATA LOADING (The "No-Loop" Version)
-@st.cache_data(ttl=60) # This forces the app to wait 60 seconds before trying Google again
-def get_data():
+# 2. DATA LOADING (The "Sunday Stable" Version)
+def load_fleet_data():
     try:
-        # Load the main status sheet
-        df = conn.read(spreadsheet=url, worksheet="Live_Status")
-        # Force Vehicle_ID to string immediately
-        df['Vehicle_ID'] = df['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
-        return df
+        # Load the sheets
+        status = conn.read(spreadsheet=url, worksheet="Live_Status", ttl=0)
+        staff = conn.read(spreadsheet=url, worksheet="1358717605", ttl=0)
+        routes = conn.read(spreadsheet=url, worksheet="29737201", ttl=0)
+        
+        # Immediate Cleaning
+        status['Vehicle_ID'] = status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        return status, staff, routes
     except Exception as e:
         return str(e)
 
-data_result = get_data()
+# Run the loader
+result = load_fleet_data()
 
-# Handle the case where Google sends a message instead of data
-if isinstance(data_result, str):
-    if "200" in data_result:
-        st.warning("⚠️ Google is initializing the connection. Please wait 30 seconds and refresh.")
-    else:
-        st.error(f"Google Error: {data_result}")
+# Error Handling
+if isinstance(result, str):
+    st.error("🔄 Connection Reset Required")
+    st.info("Google is still verifying your new Service Account permissions.")
+    if st.button("Retry Connection"):
+        st.cache_data.clear()
+        st.rerun()
     st.stop()
 else:
-    df_status = data_result
-    st.sidebar.success("✅ Connected")
+    df_status, df_staff, df_routes = result
+    st.sidebar.success("✅ Secure Connection Active")
 
 # 3. SCANNER LOGIC
 truck_id = st.query_params.get("truck")
