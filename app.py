@@ -6,31 +6,37 @@ from datetime import datetime
 st.set_page_config(page_title="Fleet Management", layout="centered")
 
 # 1. CONNECT
-conn = st.connection("gsheets", type=GSheetsConnection)
-url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-
-# 2. DATA LOADING
 try:
-    # Explicitly telling the connection to read
-    df_status = conn.read(spreadsheet=url, worksheet="Live_Status", ttl="1m")
-    df_staff = conn.read(spreadsheet=url, worksheet="Staff_List", ttl="1h")
-    df_routes = conn.read(spreadsheet=url, worksheet="Routes", ttl="1h")
-    
-    # Verify we actually got a table and not just a response code
-    if isinstance(df_status, pd.DataFrame):
-        df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
-        st.sidebar.success("✅ Secure Connection Active")
-    else:
-        st.error("Received an empty response. Trying to refresh...")
-        st.rerun()
-
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
 except Exception as e:
-    # If it's just the [200] message, let's treat it as a success and rerun
-    if "200" in str(e):
-        st.rerun()
+    st.error("Secrets or Connection failed. Check your Streamlit Dashboard.")
+    st.stop()
+
+# 2. DATA LOADING (The "No-Loop" Version)
+@st.cache_data(ttl=60) # This forces the app to wait 60 seconds before trying Google again
+def get_data():
+    try:
+        # Load the main status sheet
+        df = conn.read(spreadsheet=url, worksheet="Live_Status")
+        # Force Vehicle_ID to string immediately
+        df['Vehicle_ID'] = df['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        return df
+    except Exception as e:
+        return str(e)
+
+data_result = get_data()
+
+# Handle the case where Google sends a message instead of data
+if isinstance(data_result, str):
+    if "200" in data_result:
+        st.warning("⚠️ Google is initializing the connection. Please wait 30 seconds and refresh.")
     else:
-        st.error(f"Connection Error: {e}")
-        st.stop()
+        st.error(f"Google Error: {data_result}")
+    st.stop()
+else:
+    df_status = data_result
+    st.sidebar.success("✅ Connected")
 
 # 3. SCANNER LOGIC
 truck_id = st.query_params.get("truck")
