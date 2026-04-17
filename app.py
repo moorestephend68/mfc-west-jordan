@@ -3,12 +3,14 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# 1. SETUP
+# 1. PAGE SETUP
 st.set_page_config(page_title="Fleet Management", layout="wide")
+
+# 2. SECURE CONNECTION
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_ID = "1ib1MEFybGRteaZRJnyJ3UZAgk6mep5nsjws_uYfbwiw"
 
-# 2. DATA LOADER (GID ONLY)
+# 3. GID-BASED DATA LOADER
 @st.cache_data(ttl=10)
 def get_fleet_data():
     try:
@@ -16,12 +18,15 @@ def get_fleet_data():
         client = conn.client._client 
         sh = client.open_by_key(SHEET_ID)
         
-        # Pull data using GIDs
+        # Pull data using your verified GIDs
+        # ws_status: Live_Status
+        # ws_staff: Staff
+        # ws_routes: Routes
         ws_status = sh.get_worksheet_by_id(472708195).get_all_records()
         ws_staff = sh.get_worksheet_by_id(1358717605).get_all_records()
         ws_routes = sh.get_worksheet_by_id(29737201).get_all_records()
         
-        return pd.DataFrame(ws_status), pd.DataFrame(staff_staff), pd.DataFrame(ws_routes)
+        return pd.DataFrame(ws_status), pd.DataFrame(ws_staff), pd.DataFrame(ws_routes)
     except Exception as e:
         return f"Error connecting to GIDs: {str(e)}"
 
@@ -31,6 +36,7 @@ load_result = get_fleet_data()
 if isinstance(load_result, str):
     st.error("🚨 Sheet Access Error")
     st.write(f"Technical Detail: {load_result}")
+    st.info("Check that the Service Account is an Editor and the Sheet ID is correct.")
     if st.button("Clear Cache & Retry"):
         st.cache_data.clear()
         st.rerun()
@@ -38,10 +44,11 @@ if isinstance(load_result, str):
 
 df_status, df_staff, df_routes = load_result
 
-# 3. DATA CLEANING
+# 4. DATA CLEANING
+# Ensure Vehicle_ID is a clean string for matching (handles 9999 vs 9999.0)
 df_status['Vehicle_ID'] = df_status['Vehicle_ID'].astype(str).str.replace('.0', '', regex=False).str.strip()
 
-# 4. TRUCK SCANNER LOGIC
+# 5. TRUCK SCANNER LOGIC (?truck=XXXX)
 truck_id = st.query_params.get("truck")
 
 if truck_id:
@@ -51,7 +58,7 @@ if truck_id:
     if not truck_row.empty:
         current_status = str(truck_row.iloc[0].get('Status', '')).strip().lower()
         
-        # --- CLOCK-IN ---
+        # --- CLOCK-IN FORM ---
         if current_status in ["red", "", "nan"]:
             st.subheader(f"Clock-In: Vehicle {truck_id}")
             with st.form("checkin"):
@@ -61,15 +68,16 @@ if truck_id:
                 
                 if st.form_submit_button("Start Shift", use_container_width=True):
                     if driver_name != "Select" and route_id != "Select":
+                        # Google Sheets rows are 1-indexed, +1 for header = index + 2
                         idx = df_status[df_status['Vehicle_ID'] == truck_id].index[0] + 2
                         sh = conn.client._client.open_by_key(SHEET_ID)
                         
                         # Update Live_Status (GID: 472708195)
                         ws = sh.get_worksheet_by_id(472708195)
-                        ws.update_cell(idx, 2, "Green")
-                        ws.update_cell(idx, 3, "#00FF00")
-                        ws.update_cell(idx, 4, driver_name)
-                        ws.update_cell(idx, 5, route_id)
+                        ws.update_cell(idx, 2, "Green")       # Col B: Status
+                        ws.update_cell(idx, 3, "#00FF00")    # Col C: Color
+                        ws.update_cell(idx, 4, driver_name)  # Col D: Driver
+                        ws.update_cell(idx, 5, route_id)     # Col E: Route
                         
                         # Update Payroll_Logs (GID: 1732762001)
                         log_ws = sh.get_worksheet_by_id(1732762001)
@@ -78,8 +86,10 @@ if truck_id:
                         st.success(f"Shift Started for {driver_name}!")
                         st.cache_data.clear()
                         st.rerun()
+                    else:
+                        st.warning("Please select a Driver and a Route.")
 
-        # --- CLOCK-OUT ---
+        # --- CLOCK-OUT FORM ---
         else:
             driver_now = truck_row.iloc[0].get('Driver_Name', 'Unknown')
             st.subheader(f"Clock-Out: Vehicle {truck_id} ({driver_now})")
@@ -96,7 +106,7 @@ if truck_id:
                     ws.update_cell(idx, 4, "")
                     ws.update_cell(idx, 5, "")
                     
-                    # Log Payroll (GID: 1732762001)
+                    # Log to Payroll_Logs (GID: 1732762001)
                     log_ws = sh.get_worksheet_by_id(1732762001)
                     log_ws.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), truck_id, driver_now, "", "Check-Out", end_miles])
                     
@@ -104,11 +114,11 @@ if truck_id:
                     st.cache_data.clear()
                     st.rerun()
     else:
-        st.error(f"Vehicle '{truck_id}' not found.")
+        st.error(f"Vehicle '{truck_id}' not found in database.")
 
-# 5. DASHBOARD MAP
+# 6. DASHBOARD MAP
 st.divider()
-st.title("🚚 Fleet Dashboard")
+st.title("🚚 Live Fleet Dashboard")
 
 map_df = df_status.copy()
 map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
@@ -117,3 +127,5 @@ map_df = map_df.dropna(subset=['Lat', 'Lon'])
 
 if not map_df.empty:
     st.map(map_df, latitude="Lat", longitude="Lon", color="Status_Color", size=20, height=600)
+else:
+    st.info("Waiting for data with valid GPS coordinates in the Live_Status sheet.")
